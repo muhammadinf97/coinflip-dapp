@@ -10,7 +10,6 @@ function App() {
   const [betAmount, setBetAmount] = useState("");
   const [result, setResult] = useState("");
 
-  // Koneksi ke MetaMask
   const connectWallet = async () => {
     if (window.ethereum) {
       try {
@@ -18,27 +17,30 @@ function App() {
           method: "eth_requestAccounts",
         });
         setAccount(accounts[0]);
+        setResult("Wallet connected!");
       } catch (error) {
         console.error("Error connecting wallet:", error);
-        setResult("Failed to connect wallet!");
+        setResult("Failed to connect wallet: " + error.message);
       }
     } else {
       alert("Please install MetaMask!");
     }
   };
 
-  // Fungsi untuk coinflip
   const flipCoin = async () => {
     if (!account) {
       alert("Please connect wallet!");
       return;
     }
-
     if (!betAmount || isNaN(betAmount) || betAmount <= 0) {
-      alert("Please enter a valid bet amount!");
+      alert("Please enter a valid bet amount (e.g., 0.01 ETH)!");
       return;
     }
-
+    const betInEth = parseFloat(betAmount);
+    if (betInEth < 0.01 || betInEth > 1) {
+      alert("Bet must be between 0.01 and 1 ETH!");
+      return;
+    }
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
@@ -47,16 +49,34 @@ function App() {
         CoinflipABI.abi,
         signer
       );
-
       const tx = await contract.flip({
         value: ethers.parseEther(betAmount),
+        gasLimit: 100000,
       });
       setResult("Flipping... Waiting for transaction confirmation...");
-      await tx.wait();
-      setResult("Flip complete! Check your wallet for payout.");
+      const receipt = await tx.wait();
+      const flipEvent = receipt.logs
+        .map((log) => {
+          try {
+            return contract.interface.parseLog(log);
+          } catch (e) {
+            return null;
+          }
+        })
+        .find((log) => log && log.name === "Flip");
+      if (flipEvent) {
+        const { result, payout } = flipEvent.args;
+        setResult(
+          result
+            ? `You won! Payout: ${ethers.formatEther(payout)} ETH`
+            : "You lost!"
+        );
+      } else {
+        setResult("Flip complete, but no event found. Check your wallet.");
+      }
     } catch (error) {
       console.error("Error flipping coin:", error);
-      setResult("Error: " + (error.reason || error.message));
+      setResult("Error: " + (error.reason || error.message || "Transaction failed"));
     }
   };
 
